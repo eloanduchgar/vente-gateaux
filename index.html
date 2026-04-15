@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>🧁 CaisseEuro — EDG</title>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,400;0,700;0,900;1,400&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
 <style>
 :root{
   --accent:#C8884A;--accent-dark:#A06830;--bg-body:#FDF6EC;
@@ -383,7 +383,7 @@ header h1 span{color:var(--accent);}
           <div class="guide-step"><div class="guide-num">2</div><div>Ajuste les quantités avec les boutons − et + dans le panier.</div></div>
           <div class="guide-step"><div class="guide-num">3</div><div>Choisis le mode de paiement : <strong>💵 Espèces</strong> ou <strong>💳 TPE</strong>.</div></div>
           <div class="guide-step"><div class="guide-num">4</div><div>En espèces : saisis le montant remis, le rendu s'affiche automatiquement.</div></div>
-          <div class="guide-step"><div class="guide-num">5</div><div>Clique <strong>Encaisser ✓</strong> pour valider la vente. Un ticket PDF est disponible.</div></div>
+          <div class="guide-step"><div class="guide-num">5</div><div>Clique <strong>Encaisser ✓</strong> pour valider la vente.</div></div>
           <div class="guide-tip">💡 Les boissons n'ont pas de stock — elles sont toujours disponibles.</div>
         </div>
         <div class="guide-section">
@@ -394,23 +394,11 @@ header h1 span{color:var(--accent);}
           <div class="guide-step"><div class="guide-num">4</div><div><strong>✕ Supprimer</strong> : retire le produit du catalogue.</div></div>
         </div>
         <div class="guide-section">
-          <div class="guide-title">🧾 Ticket PDF</div>
-          <div class="guide-step"><div class="guide-num">1</div><div>Après avoir cliqué <strong>Encaisser</strong>, un bouton <strong>🧾 Ticket PDF</strong> apparaît.</div></div>
-          <div class="guide-step"><div class="guide-num">2</div><div>Clique dessus pour générer et télécharger le ticket de caisse en PDF.</div></div>
-          <div class="guide-tip">💡 Tu peux aussi exporter tout l'historique en CSV ou en rapport TXT depuis l'onglet Historique.</div>
-        </div>
-        <div class="guide-section">
           <div class="guide-title">💾 Sauvegardes</div>
           <div class="guide-step"><div class="guide-num">1</div><div>Va dans l'onglet <strong>Stats</strong> et clique <strong>📸 Créer une sauvegarde</strong>.</div></div>
           <div class="guide-step"><div class="guide-num">2</div><div>Les 5 dernières sauvegardes sont conservées automatiquement.</div></div>
           <div class="guide-step"><div class="guide-num">3</div><div>En cas de problème, clique <strong>Restaurer</strong> pour revenir à un état sauvegardé.</div></div>
           <div class="guide-tip">⚠️ Effacer l'historique demande un mot de passe. Contacte ton responsable si tu ne l'as pas.</div>
-        </div>
-        <div class="guide-section">
-          <div class="guide-title">👑 Compte Administrateur</div>
-          <div class="guide-step"><div class="guide-num">1</div><div>Sur la page de connexion, clique <strong>👑 Admin</strong>.</div></div>
-          <div class="guide-step"><div class="guide-num">2</div><div>Le tableau de bord montre les stats des deux classes en temps réel.</div></div>
-          <div class="guide-step"><div class="guide-num">3</div><div>Idéal pour suivre les recettes depuis un autre appareil pendant la vente.</div></div>
         </div>
       </div>
 
@@ -471,10 +459,7 @@ header h1 span{color:var(--accent);}
           <button class="btn-clear" onclick="clearCart()">🗑</button>
           <button class="btn-encaisser" id="btn-encaisser" onclick="encaisser()" disabled>Encaisser ✓</button>
         </div>
-        <!-- Bouton ticket PDF (apparaît après encaissement) -->
-        <div id="ticket-pdf-zone" style="margin-top:9px;display:none;">
-          <button class="btn btn-blue" style="width:100%;padding:10px;" onclick="downloadLastTicketPDF()">🧾 Télécharger le ticket PDF</button>
-        </div>
+        <div id="ticket-pdf-zone" style="display:none;"></div>
       </div>
     </div>
   </div>
@@ -504,8 +489,6 @@ header h1 span{color:var(--accent);}
         <div class="admin-stat"><div class="admin-stat-label">💳 TPE</div><div class="admin-stat-value" style="color:var(--blue)" id="adm-p-tpe">—</div></div>
         <div class="admin-stat"><div class="admin-stat-label">💵 Espèces</div><div class="admin-stat-value" style="color:var(--green)" id="adm-p-cash">—</div></div>
       </div>
-      <div class="section-title" style="font-size:.85rem;margin-bottom:10px">🏆 Top produits</div>
-      <div id="adm-p-top"></div>
     </div>
     <!-- TERMINALE -->
     <div class="admin-section">
@@ -516,8 +499,6 @@ header h1 span{color:var(--accent);}
         <div class="admin-stat"><div class="admin-stat-label">💳 TPE</div><div class="admin-stat-value" style="color:var(--blue)" id="adm-t-tpe">—</div></div>
         <div class="admin-stat"><div class="admin-stat-label">💵 Espèces</div><div class="admin-stat-value" style="color:var(--green)" id="adm-t-cash">—</div></div>
       </div>
-      <div class="section-title" style="font-size:.85rem;margin-bottom:10px">🏆 Top produits</div>
-      <div id="adm-t-top"></div>
     </div>
     <!-- TOTAL COMBINÉ -->
     <div class="admin-section" style="grid-column:1/-1">
@@ -528,6 +509,8 @@ header h1 span{color:var(--accent);}
         <div class="admin-stat"><div class="admin-stat-label">💳 TPE total</div><div class="admin-stat-value" style="color:var(--blue)" id="adm-total-tpe">—</div></div>
         <div class="admin-stat"><div class="admin-stat-label">💵 Espèces total</div><div class="admin-stat-value" style="color:var(--green)" id="adm-total-cash">—</div></div>
       </div>
+      <div class="section-title" style="font-size:.88rem;margin-bottom:12px;margin-top:6px">📈 Recettes par classe</div>
+      <div id="adm-recettes-classes"></div>
     </div>
   </div>
   <div class="copyright">© EDG — CaisseEuro Admin</div>
@@ -786,14 +769,6 @@ function initAdmin() {
     const s = snap.exists() ? snap.data().items||[] : [];
     renderAdminSpace('t',s);
   });
-
-  // Top produits pour admin
-  onSnapshot(doc(db,'premiere','products'), snap=>{
-    if(snap.exists()) renderAdminTop('p', snap.data().items||[]);
-  });
-  onSnapshot(doc(db,'terminale','products'), snap=>{
-    if(snap.exists()) renderAdminTop('t', snap.data().items||[]);
-  });
 }
 
 let adminStats={p:{ventes:0,ca:0,tpe:0,cash:0}, t:{ventes:0,ca:0,tpe:0,cash:0}};
@@ -816,20 +791,40 @@ function renderAdminSpace(key, salesData) {
   document.getElementById('adm-total-ca').textContent     = fmtA(tca);
   document.getElementById('adm-total-tpe').textContent    = fmtA(ttpe);
   document.getElementById('adm-total-cash').textContent   = fmtA(tcash);
+  renderRecettesClasses(tca);
 }
 
-function renderAdminTop(key, prods) {
-  const sorted=[...prods].sort((a,b)=>b.sold-a.sold).slice(0,3);
-  const el=document.getElementById(`adm-${key}-top`);
-  if(!el) return;
-  if(!sorted.length||sorted.every(p=>p.sold===0)){el.innerHTML='<div style="color:var(--text-muted);font-size:.8rem;padding:6px 0">Aucune vente encore</div>';return;}
-  el.innerHTML=sorted.map((p,i)=>`
-    <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-body);border-radius:9px;margin-bottom:5px;font-size:.82rem;">
-      <strong style="color:var(--accent);min-width:16px">${i+1}</strong>
-      <span>${p.emoji}</span>
-      <span style="flex:1;font-weight:600">${p.name}</span>
-      <span style="color:var(--text-muted)">${p.sold} vendus</span>
-    </div>`).join('');
+function renderRecettesClasses(totalCombine) {
+  const el = document.getElementById('adm-recettes-classes');
+  if (!el) return;
+  const pCa = adminStats.p.ca;
+  const tCa = adminStats.t.ca;
+  const total = totalCombine || (pCa + tCa);
+  const pPct = total > 0 ? (pCa / total * 100).toFixed(1) : 0;
+  const tPct = total > 0 ? (tCa / total * 100).toFixed(1) : 0;
+  el.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+          <span style="font-weight:700;font-size:.9rem">🥐 Euro Première</span>
+          <span style="font-family:'Fraunces',serif;font-weight:900;font-size:1.05rem;color:var(--accent)">${fmtA(pCa)}</span>
+        </div>
+        <div style="background:var(--bg-warm);border-radius:8px;height:12px;overflow:hidden;">
+          <div style="height:100%;background:var(--accent);border-radius:8px;width:${pPct}%;transition:width .4s ease;"></div>
+        </div>
+        <div style="font-size:.73rem;color:var(--text-muted);margin-top:3px">${pPct}% du total — ${adminStats.p.ventes} vente(s)</div>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+          <span style="font-weight:700;font-size:.9rem">🎂 Euro Terminale</span>
+          <span style="font-family:'Fraunces',serif;font-weight:900;font-size:1.05rem;color:var(--blue)">${fmtA(tCa)}</span>
+        </div>
+        <div style="background:var(--bg-warm);border-radius:8px;height:12px;overflow:hidden;">
+          <div style="height:100%;background:var(--blue);border-radius:8px;width:${tPct}%;transition:width .4s ease;"></div>
+        </div>
+        <div style="font-size:.73rem;color:var(--text-muted);margin-top:3px">${tPct}% du total — ${adminStats.t.ventes} vente(s)</div>
+      </div>
+    </div>`;
 }
 
 /* ── TABS ────────────────────────────────────────────── */
@@ -981,7 +976,6 @@ function clearCart() {
   cart=[];
   document.getElementById('cash-given').value='';
   document.getElementById('rendu-result').style.display='none';
-  document.getElementById('ticket-pdf-zone').style.display='none';
   renderCart();
 }
 window.clearCart=clearCart;
@@ -1089,63 +1083,17 @@ async function encaisser(){
   lastSale=saleObj;
   await save();
   showToast(isTpe?'💳 Paiement carte enregistré !':'✅ Encaissé ! Rendu : '+fmt(rendu));
-  document.getElementById('ticket-pdf-zone').style.display='block';
   clearCart();
 }
 window.encaisser=encaisser;
 
-/* ── TICKET PDF ──────────────────────────────────────── */
-function downloadLastTicketPDF(){
-  if(!lastSale){showToast('⚠️ Aucune vente récente');return;}
-  const {jsPDF}=window.jspdf;
-  const doc2=new jsPDF({unit:'mm',format:[80,120]});
-  const s=lastSale;
-  const acc=ACCOUNTS[currentSpace];
-  let y=8;
-  doc2.setFontSize(13);doc2.setFont('helvetica','bold');
-  doc2.text('TICKET DE CAISSE',40,y,'center');y+=7;
-  doc2.setFontSize(9);doc2.setFont('helvetica','normal');
-  doc2.text(acc.label,40,y,'center');y+=5;
-  doc2.text('EDG — Section Européenne',40,y,'center');y+=5;
-  doc2.text('Date : '+s.date+'  Heure : '+s.time,40,y,'center');y+=6;
-  doc2.setDrawColor(180);doc2.line(4,y,76,y);y+=5;
-  doc2.setFont('helvetica','bold');
-  doc2.text('Article',4,y);doc2.text('Qté',50,y,'center');doc2.text('Prix',76,y,'right');y+=5;
-  doc2.setDrawColor(200);doc2.line(4,y,76,y);y+=4;
-  doc2.setFont('helvetica','normal');
-  s.items.forEach(item=>{
-    const nm=item.name.length>18?item.name.substring(0,18)+'…':item.name;
-    doc2.text(item.emoji+' '+nm,4,y);
-    doc2.text('x'+item.qty,50,y,'center');
-    doc2.text(fmtA(item.price*item.qty),76,y,'right');
-    y+=5;
-  });
-  doc2.setDrawColor(180);doc2.line(4,y,76,y);y+=5;
-  doc2.setFont('helvetica','bold');doc2.setFontSize(11);
-  doc2.text('TOTAL',4,y);doc2.text(fmtA(s.total),76,y,'right');y+=6;
-  doc2.setFontSize(9);doc2.setFont('helvetica','normal');
-  if(s.payMode==='tpe'){
-    doc2.text('Paiement : 💳 TPE/Carte',4,y);y+=5;
-  } else {
-    doc2.text('Paiement : 💵 Espèces',4,y);y+=5;
-    doc2.text('Donné : '+fmtA(s.given),4,y);y+=5;
-    doc2.text('Rendu : '+fmtA(s.rendu),4,y);y+=5;
-  }
-  doc2.line(4,y,76,y);y+=5;
-  doc2.setFont('helvetica','italic');
-  doc2.text('Merci pour votre achat ! 🧁',40,y,'center');y+=5;
-  doc2.text('© EDG',40,y,'center');
-  doc2.save('ticket_'+s.id+'_'+s.date.replace(/\//g,'-')+'.pdf');
-  showToast('🧾 Ticket PDF téléchargé !');
-}
-window.downloadLastTicketPDF=downloadLastTicketPDF;
 
 /* ── HISTORIQUE ──────────────────────────────────────── */
 function renderHistorique(){
   const el=document.getElementById('histo-content');
   if(!sales.length){el.innerHTML='<div style="text-align:center;padding:40px;color:var(--text-muted)">Aucune vente enregistrée</div>';return;}
   el.innerHTML=`<table class="histo-table">
-    <thead><tr><th>#</th><th>Heure</th><th>Articles</th><th>Mode</th><th>Total</th><th>Rendu</th><th class="center">PDF</th><th class="center">✕</th></tr></thead>
+    <thead><tr><th>#</th><th>Heure</th><th>Articles</th><th>Mode</th><th>Total</th><th>Rendu</th><th class="center">✕</th></tr></thead>
     <tbody>${[...sales].reverse().map(s=>`
       <tr>
         <td><strong>${s.id}</strong></td>
@@ -1154,7 +1102,6 @@ function renderHistorique(){
         <td>${s.payMode==='tpe'?'<span class="badge-tpe">💳 TPE</span>':'<span class="badge-cash">💵 Espèces</span>'}</td>
         <td><strong style="color:var(--accent-dark)">${fmt(s.total)}</strong></td>
         <td style="color:${s.payMode==='tpe'?'var(--blue)':'var(--green)'}">${s.payMode==='tpe'?'—':fmt(s.rendu)}</td>
-        <td class="center"><button class="del-row-btn" style="background:#E8F0FE;color:var(--blue);" onclick="downloadTicketPDF(${s.id})" title="Ticket PDF">🧾</button></td>
         <td class="center"><button class="del-row-btn" onclick="deleteRow(${s.id})" title="Supprimer">✕</button></td>
       </tr>`).join('')}
     </tbody></table>`;
