@@ -17,9 +17,19 @@
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:'DM Sans',sans-serif;background:var(--bg-body);color:var(--text);min-height:100vh;}
 
+/* LOADING SCREEN */
+#loading-screen{
+  position:fixed;inset:0;background:var(--brown);z-index:9999;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
+}
+#loading-screen .loading-logo{font-size:3rem;}
+#loading-screen .loading-text{color:rgba(255,255,255,.7);font-size:.9rem;font-weight:600;}
+.spinner{width:32px;height:32px;border:3px solid rgba(255,255,255,.2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+
 /* LOGIN */
 #login-page{
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  display:none;flex-direction:column;align-items:center;justify-content:center;
   min-height:100vh;background:var(--brown);padding:24px;
   background-image:radial-gradient(circle at 30% 20%,rgba(200,136,74,.3),transparent 55%),
                    radial-gradient(circle at 75% 80%,rgba(200,136,74,.15),transparent 50%);
@@ -88,6 +98,14 @@ header h1 span{color:var(--accent);}
   border-radius:30px;padding:4px 13px;font-size:.8rem;font-weight:600;white-space:nowrap;
 }
 .stat-pill span{color:var(--accent);font-family:'Fraunces',serif;font-size:.9rem;}
+/* sync indicator */
+.sync-dot{
+  width:8px;height:8px;border-radius:50%;background:var(--green);
+  display:inline-block;margin-right:5px;transition:background .3s;
+}
+.sync-dot.syncing{background:orange;animation:pulse .6s infinite alternate;}
+.sync-dot.error{background:var(--red);}
+@keyframes pulse{from{opacity:.4}to{opacity:1}}
 .hdr-right{display:flex;align-items:center;gap:9px;}
 .btn-logout{
   background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);
@@ -327,6 +345,13 @@ header h1 span{color:var(--accent);}
 </head>
 <body>
 
+<!-- LOADING -->
+<div id="loading-screen">
+  <div class="loading-logo">🧁</div>
+  <div class="spinner"></div>
+  <div class="loading-text">Connexion à Firebase…</div>
+</div>
+
 <!-- LOGIN PAGE -->
 <div id="login-page">
   <div class="login-card">
@@ -370,7 +395,7 @@ header h1 span{color:var(--accent);}
       <div class="stat-pill">Ventes : <span id="hdr-ventes">0</span></div>
       <div class="stat-pill">Total : <span id="hdr-recette">0,00 €</span></div>
       <div class="stat-pill">💳 <span id="hdr-tpe">0,00 €</span>&nbsp;|&nbsp;💵 <span id="hdr-cash">0,00 €</span></div>
-      <div class="stat-pill" id="hdr-heure">–</div>
+      <div class="stat-pill"><span class="sync-dot" id="sync-dot"></span><span id="hdr-heure">–</span></div>
     </div>
     <div class="hdr-right">
       <button class="btn-logout" onclick="logout()">⎋ Déconnexion</button>
@@ -528,24 +553,123 @@ header h1 span{color:var(--accent);}
 
 <div id="toast"></div>
 
-<script>
+<!-- FIREBASE SDK -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+  getFirestore, doc, getDoc, setDoc, onSnapshot, collection
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+/* ── CONFIG FIREBASE ─────────────────────────────────── */
+const firebaseConfig = {
+  apiKey: "AIzaSyCZ1Vf4PiiQ_KkgGB-x1NlOv6h_vkFKUfU",
+  authDomain: "caisse-euro.firebaseapp.com",
+  projectId: "caisse-euro",
+  storageBucket: "caisse-euro.firebasestorage.app",
+  messagingSenderId: "382798938068",
+  appId: "1:382798938068:web:3b7885ce6b9e6d48056041"
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getFirestore(firebaseApp);
+
 /* ── COMPTES ─────────────────────────────────────────── */
 const ACCOUNTS = {
-  premiere:  { user:'euro1ere',      pass:'premiere2025',  label:'Euro Première',  badgeClass:'' },
-  terminale: { user:'euroTle',       pass:'terminale2025', label:'Euro Terminale', badgeClass:'tl' },
+  premiere:  { user:'euro1ere',   pass:'premiere2025',  label:'Euro Première',  badgeClass:'' },
+  terminale: { user:'euroTle',    pass:'terminale2025', label:'Euro Terminale', badgeClass:'tl' },
 };
-let currentSpace = null;
 
+/* ── ÉTAT ────────────────────────────────────────────── */
+let currentSpace = null;
+let products = [], sales = [], cart = [], nextId = 1, payMode = 'cash';
+let unsubProducts = null, unsubSales = null; // listeners temps réel
+
+/* ── PRODUITS PAR DÉFAUT ─────────────────────────────── */
+const DEFAULT_PRODUCTS = [
+  {id:1,emoji:'🍫',name:'Brownie choco',price:1.50,stock:20,sold:0},
+  {id:2,emoji:'🍋',name:'Tarte citron',price:2.00,stock:15,sold:0},
+  {id:3,emoji:'🍪',name:'Cookies',price:1.00,stock:30,sold:0},
+  {id:4,emoji:'🥐',name:'Muffin vanille',price:1.50,stock:18,sold:0},
+  {id:5,emoji:'🍓',name:'Fraisier',price:2.50,stock:10,sold:0},
+  {id:6,emoji:'🎂',name:'Part de gâteau',price:2.00,stock:12,sold:0},
+];
+
+/* ── FIREBASE : LECTURE INITIALE + TEMPS RÉEL ────────── */
+async function loadData() {
+  setSyncState('syncing');
+
+  // --- PRODUITS : écoute en temps réel ---
+  const prodRef = doc(db, currentSpace, 'products');
+  unsubProducts = onSnapshot(prodRef, snap => {
+    if (snap.exists()) {
+      products = snap.data().items || [];
+    } else {
+      // Première connexion : on initialise avec les produits par défaut
+      products = DEFAULT_PRODUCTS.map(p => ({...p}));
+      setDoc(prodRef, { items: products });
+    }
+    nextId = products.reduce((m, p) => Math.max(m, p.id), 0) + 1;
+    renderProducts();
+    updateHeader();
+    setSyncState('ok');
+  }, err => {
+    console.error('Firestore produits:', err);
+    setSyncState('error');
+    showToast('⚠️ Erreur de synchronisation');
+  });
+
+  // --- VENTES : écoute en temps réel ---
+  const salesRef = doc(db, currentSpace, 'sales');
+  unsubSales = onSnapshot(salesRef, snap => {
+    if (snap.exists()) {
+      sales = snap.data().items || [];
+    } else {
+      sales = [];
+    }
+    updateHeader();
+    // Refresh si l'onglet historique/stats est ouvert
+    if (document.getElementById('tab-historique').classList.contains('active')) renderHistorique();
+    if (document.getElementById('tab-stats').classList.contains('active')) renderStats();
+  }, err => {
+    console.error('Firestore ventes:', err);
+  });
+}
+
+/* ── FIREBASE : SAUVEGARDE ───────────────────────────── */
+async function save() {
+  setSyncState('syncing');
+  try {
+    await Promise.all([
+      setDoc(doc(db, currentSpace, 'products'), { items: products }),
+      setDoc(doc(db, currentSpace, 'sales'),    { items: sales }),
+    ]);
+    setSyncState('ok');
+  } catch(e) {
+    console.error('Erreur save Firebase:', e);
+    setSyncState('error');
+    showToast('⚠️ Erreur de sauvegarde !');
+  }
+}
+
+function setSyncState(state) {
+  const dot = document.getElementById('sync-dot');
+  if (!dot) return;
+  dot.className = 'sync-dot' + (state==='syncing' ? ' syncing' : state==='error' ? ' error' : '');
+  dot.title = state==='ok' ? 'Synchronisé ✓' : state==='syncing' ? 'Synchronisation…' : 'Erreur réseau';
+}
+
+/* ── LOGIN ───────────────────────────────────────────── */
 function selectAccount(space) {
   document.getElementById('chip-premiere').classList.toggle('selected', space==='premiere');
   document.getElementById('chip-terminale').classList.toggle('selected', space==='terminale');
   document.getElementById('login-user').value = ACCOUNTS[space].user;
   document.getElementById('login-pass').focus();
 }
+window.selectAccount = selectAccount;
 
-function doLogin() {
-  const u = document.getElementById('login-user').value.trim();
-  const p = document.getElementById('login-pass').value;
+async function doLogin() {
+  const u   = document.getElementById('login-user').value.trim();
+  const p   = document.getElementById('login-pass').value;
   const err = document.getElementById('login-error');
   let found = null;
   for (const [key, acc] of Object.entries(ACCOUNTS)) {
@@ -554,20 +678,18 @@ function doLogin() {
   if (!found) { err.style.display = 'block'; return; }
   err.style.display = 'none';
   currentSpace = found;
-  initApp();
+  await initApp();
 }
+window.doLogin = doLogin;
 
 function logout() {
   if (!confirm('Se déconnecter ?')) return;
-  // Sauvegarde avant de partir
-  if (currentSpace) save();
-  // Reset état
+  // Arrêter les listeners temps réel
+  if (unsubProducts) { unsubProducts(); unsubProducts = null; }
+  if (unsubSales)    { unsubSales();    unsubSales    = null; }
   currentSpace = null;
-  cart = [];
-  products = [];
-  sales = [];
-  // Retour login
-  document.getElementById('app').style.display = 'none';
+  cart = []; products = []; sales = [];
+  document.getElementById('app').style.display        = 'none';
   document.getElementById('login-page').style.display = 'flex';
   document.getElementById('login-user').value = '';
   document.getElementById('login-pass').value = '';
@@ -576,54 +698,27 @@ function logout() {
   document.getElementById('chip-terminale').classList.remove('selected');
   applyThemeObj(THEMES[0], false);
 }
-
-/* ── STORAGE NAMESPACE ───────────────────────────────── */
-function SK(key) { return `caisse_${currentSpace}_${key}`; }
-
-function loadData() {
-  const def = [
-    {id:1,emoji:'🍫',name:'Brownie choco',price:1.50,stock:20,sold:0},
-    {id:2,emoji:'🍋',name:'Tarte citron',price:2.00,stock:15,sold:0},
-    {id:3,emoji:'🍪',name:'Cookies',price:1.00,stock:30,sold:0},
-    {id:4,emoji:'🥐',name:'Muffin vanille',price:1.50,stock:18,sold:0},
-    {id:5,emoji:'🍓',name:'Fraisier',price:2.50,stock:10,sold:0},
-    {id:6,emoji:'🎂',name:'Part de gâteau',price:2.00,stock:12,sold:0},
-  ];
-  products = JSON.parse(localStorage.getItem(SK('products')) || 'null') || def;
-  sales    = JSON.parse(localStorage.getItem(SK('sales'))    || '[]');
-  nextId   = products.reduce((m,p) => Math.max(m,p.id), 0) + 1;
-}
-
-function save() {
-  localStorage.setItem(SK('products'), JSON.stringify(products));
-  localStorage.setItem(SK('sales'),    JSON.stringify(sales));
-}
-
-/* ── STATE ───────────────────────────────────────────── */
-let products=[], sales=[], cart=[], nextId=1, payMode='cash';
+window.logout = logout;
 
 /* ── INIT APP ────────────────────────────────────────── */
-function initApp() {
-  loadData();
+async function initApp() {
   document.getElementById('login-page').style.display = 'none';
   document.getElementById('app').style.display = 'block';
 
-  const acc = ACCOUNTS[currentSpace];
+  const acc   = ACCOUNTS[currentSpace];
   const badge = document.getElementById('hdr-badge');
   badge.textContent = acc.label;
-  badge.className = 'hdr-badge' + (acc.badgeClass ? ' '+acc.badgeClass : '');
+  badge.className   = 'hdr-badge' + (acc.badgeClass ? ' '+acc.badgeClass : '');
 
-  // Thème disponible seulement pour Première
   const isP = currentSpace === 'premiere';
   document.getElementById('tab-theme-btn').style.display = isP ? 'block' : 'none';
   if (isP) {
     const saved = localStorage.getItem('caisse_premiere_theme');
     if (saved) applyThemeObj(JSON.parse(saved), false);
   } else {
-    applyThemeObj(THEMES[0], false); // reset au thème de base pour Terminale
+    applyThemeObj(THEMES[0], false);
   }
 
-  // Reset au catalogue
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.getElementById('tab-catalogue').classList.add('active');
@@ -631,7 +726,12 @@ function initApp() {
 
   payMode = 'cash';
   setPayMode('cash');
-  renderProducts(); renderCart(); updateHeader(); updateClock(); renderThemes();
+  renderCart();
+  updateClock();
+  renderThemes();
+
+  // Chargement Firebase (avec listeners temps réel)
+  await loadData();
 }
 
 /* ── TABS ────────────────────────────────────────────── */
@@ -643,11 +743,15 @@ function switchTab(name, btn) {
   if (name==='historique') renderHistorique();
   if (name==='stats') renderStats();
 }
+window.switchTab = switchTab;
 
 /* ── PRODUCTS ────────────────────────────────────────── */
 function renderProducts() {
   const g = document.getElementById('products-grid');
-  if (!products.length) { g.innerHTML='<div style="color:var(--text-muted);padding:18px 0;font-size:.86rem">Aucun produit. Ajoutes-en un !</div>'; updateHeader(); return; }
+  if (!products.length) {
+    g.innerHTML='<div style="color:var(--text-muted);padding:18px 0;font-size:.86rem">Aucun produit. Ajoutes-en un !</div>';
+    updateHeader(); return;
+  }
   g.innerHTML = products.map(p => `
     <div class="product-card" onclick="addToCart(${p.id})" style="${p.stock===0?'opacity:.55;':''}">
       <button class="del-prod-btn" onclick="event.stopPropagation();deleteProduct(${p.id})" title="Supprimer">✕</button>
@@ -662,7 +766,7 @@ function renderProducts() {
   updateHeader();
 }
 
-function addProduct() {
+async function addProduct() {
   const emoji = document.getElementById('new-emoji').value.trim()||'🍰';
   const name  = document.getElementById('new-name').value.trim();
   const price = parseFloat(document.getElementById('new-price').value);
@@ -672,15 +776,19 @@ function addProduct() {
   document.getElementById('new-name').value='';
   document.getElementById('new-price').value='';
   document.getElementById('new-stock').value='';
-  save(); renderProducts(); showToast('✅ '+emoji+' '+name+' ajouté !');
+  await save();
+  showToast('✅ '+emoji+' '+name+' ajouté !');
 }
+window.addProduct = addProduct;
 
-function deleteProduct(id) {
+async function deleteProduct(id) {
   if (!confirm('Supprimer ce produit ?')) return;
   products = products.filter(p=>p.id!==id);
-  cart = cart.filter(c=>c.productId!==id);
-  save(); renderProducts(); renderCart();
+  cart     = cart.filter(c=>c.productId!==id);
+  await save();
+  renderCart();
 }
+window.deleteProduct = deleteProduct;
 
 /* ── CART ────────────────────────────────────────────── */
 function addToCart(id) {
@@ -689,16 +797,19 @@ function addToCart(id) {
   const ex = cart.find(c=>c.productId===id);
   if (ex) { if(ex.qty>=p.stock){showToast('⚠️ Stock insuffisant!');return;} ex.qty++; }
   else cart.push({productId:id,name:p.name,emoji:p.emoji,price:p.price,qty:1});
-  renderCart(); showToast(p.emoji+' Ajouté au panier');
+  renderCart();
+  showToast(p.emoji+' Ajouté au panier');
 }
+window.addToCart = addToCart;
 
-function changeQty(pid,d) {
+function changeQty(pid, d) {
   const item = cart.find(c=>c.productId===pid);
   if (!item) return;
   item.qty += d;
   if (item.qty<=0) cart = cart.filter(c=>c.productId!==pid);
   renderCart();
 }
+window.changeQty = changeQty;
 
 function clearCart() {
   cart=[];
@@ -706,22 +817,21 @@ function clearCart() {
   document.getElementById('rendu-result').style.display='none';
   renderCart();
 }
+window.clearCart = clearCart;
 
-const getTotal = () => cart.reduce((s,c)=>s+c.price*c.qty,0);
+const getTotal = () => cart.reduce((s,c)=>s+c.price*c.qty, 0);
 
 function renderCart() {
   const panier = document.getElementById('panier');
-  const total = getTotal();
-  const count = cart.reduce((s,c)=>s+c.qty,0);
+  const total  = getTotal();
+  const count  = cart.reduce((s,c)=>s+c.qty, 0);
   document.getElementById('ticket-count').textContent = count===0?'Aucun article':count+' article(s)';
   document.getElementById('subtotal').textContent = fmt(total);
-  document.getElementById('total').textContent = fmt(total);
+  document.getElementById('total').textContent    = fmt(total);
 
-  // Disabled state depends on mode
   if (payMode==='tpe') {
     document.getElementById('btn-encaisser').disabled = cart.length===0;
   } else {
-    // Will be resolved by calcMonnaie
     document.getElementById('btn-encaisser').disabled = true;
   }
 
@@ -754,6 +864,7 @@ function renderCart() {
 }
 
 function setQuick(v) { document.getElementById('cash-given').value=v; calcMonnaie(); }
+window.setQuick = setQuick;
 
 /* ── PAIEMENT ────────────────────────────────────────── */
 function setPayMode(mode) {
@@ -770,31 +881,27 @@ function setPayMode(mode) {
     calcMonnaie();
   }
 }
+window.setPayMode = setPayMode;
 
 function calcMonnaie() {
   if (payMode==='tpe') return;
   const total = getTotal();
   const given = parseFloat(document.getElementById('cash-given').value)||0;
-  const el = document.getElementById('rendu-result');
-  const hint = document.getElementById('cash-required-hint');
+  const el    = document.getElementById('rendu-result');
+  const hint  = document.getElementById('cash-required-hint');
   const input = document.getElementById('cash-given');
 
   if (given<=0 || total<=0) {
     el.style.display='none';
-    // Bloquer si panier non vide mais rien de saisi
-    const hasCart = cart.length>0 && total>0;
     document.getElementById('btn-encaisser').disabled = true;
-    if (hasCart) {
-      hint.classList.add('show');
-      input.classList.add('warn');
+    if (cart.length>0 && total>0) {
+      hint.classList.add('show'); input.classList.add('warn');
     } else {
-      hint.classList.remove('show');
-      input.classList.remove('warn');
+      hint.classList.remove('show'); input.classList.remove('warn');
     }
     return;
   }
-  hint.classList.remove('show');
-  input.classList.remove('warn');
+  hint.classList.remove('show'); input.classList.remove('warn');
   const rendu = given-total;
   el.style.display='flex';
   el.className='rendu-result '+(rendu>=0?'rendu-ok':'rendu-error');
@@ -803,35 +910,37 @@ function calcMonnaie() {
     :`<span>⚠️ Somme insuffisante</span><span>Manque ${fmt(-rendu)}</span>`;
   document.getElementById('btn-encaisser').disabled = cart.length===0 || rendu<0;
 }
+window.calcMonnaie = calcMonnaie;
 
 /* ── ENCAISSER ───────────────────────────────────────── */
-function encaisser() {
+async function encaisser() {
   if (!cart.length) return;
   const total = getTotal();
   const isTpe = payMode==='tpe';
   const given = isTpe ? total : (parseFloat(document.getElementById('cash-given').value)||0);
-  // Sécurité : bloquer si espèces et montant non saisi ou insuffisant
   if (!isTpe) {
-    if (given <= 0) { showToast('⚠️ Saisis le montant remis !'); calcMonnaie(); return; }
-    if (given < total) { showToast('⚠️ Montant insuffisant !'); return; }
+    if (given<=0) { showToast('⚠️ Saisis le montant remis !'); calcMonnaie(); return; }
+    if (given<total) { showToast('⚠️ Montant insuffisant !'); return; }
   }
   const rendu = isTpe ? 0 : given-total;
-  const now = new Date();
+  const now   = new Date();
+  // Décrémenter le stock localement
   cart.forEach(item => {
     const p = products.find(x=>x.id===item.productId);
     if (p) { p.stock-=item.qty; p.sold+=item.qty; }
   });
   sales.push({
-    id: sales.length+1,
+    id:   sales.length+1,
     time: now.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit',second:'2-digit'}),
     date: now.toLocaleDateString('fr-FR'),
     items: cart.map(c=>({...c})),
     total, given, rendu, payMode: isTpe?'tpe':'cash'
   });
-  save();
+  await save();
   showToast(isTpe?'💳 Paiement carte enregistré !':'✅ Encaissé ! Rendu : '+fmt(rendu));
-  clearCart(); renderProducts(); updateHeader();
+  clearCart();
 }
+window.encaisser = encaisser;
 
 /* ── HISTORIQUE ──────────────────────────────────────── */
 function renderHistorique() {
@@ -861,21 +970,23 @@ function renderHistorique() {
   </table>`;
 }
 
-function deleteRow(id) {
+async function deleteRow(id) {
   if (!confirm('Supprimer cette ligne de vente ?')) return;
   sales = sales.filter(s=>s.id!==id);
-  save(); renderHistorique(); updateHeader();
+  await save();
+  renderHistorique();
   showToast('🗑 Ligne supprimée');
 }
+window.deleteRow = deleteRow;
 
 /* ── STATS ───────────────────────────────────────────── */
 function renderStats() {
-  const tot  = sales.length;
-  const ca   = sales.reduce((s,v)=>s+v.total,0);
-  const art  = sales.reduce((s,v)=>v.items.reduce((a,i)=>a+i.qty,s),0);
-  const moy  = tot>0?ca/tot:0;
-  const tpe  = sales.filter(s=>s.payMode==='tpe');
-  const cash = sales.filter(s=>s.payMode!=='tpe');
+  const tot   = sales.length;
+  const ca    = sales.reduce((s,v)=>s+v.total,0);
+  const art   = sales.reduce((s,v)=>v.items.reduce((a,i)=>a+i.qty,s),0);
+  const moy   = tot>0?ca/tot:0;
+  const tpe   = sales.filter(s=>s.payMode==='tpe');
+  const cash  = sales.filter(s=>s.payMode!=='tpe');
   const caTpe  = tpe.reduce((s,v)=>s+v.total,0);
   const caCash = cash.reduce((s,v)=>s+v.total,0);
 
@@ -890,10 +1001,10 @@ function renderStats() {
   const byP={};
   sales.forEach(s=>s.items.forEach(i=>{
     if(!byP[i.name])byP[i.name]={emoji:i.emoji,qty:0,ca:0};
-    byP[i.name].qty+=i.qty;byP[i.name].ca+=i.price*i.qty;
+    byP[i.name].qty+=i.qty; byP[i.name].ca+=i.price*i.qty;
   }));
-  const sorted=Object.entries(byP).sort((a,b)=>b[1].qty-a[1].qty);
-  const maxQ=sorted[0]?.[1]?.qty||1;
+  const sorted = Object.entries(byP).sort((a,b)=>b[1].qty-a[1].qty);
+  const maxQ   = sorted[0]?.[1]?.qty||1;
   document.getElementById('top-products-list').innerHTML = sorted.length===0
     ?'<div style="color:var(--text-muted);text-align:center;padding:20px">Aucune donnée</div>'
     :sorted.map(([name,d],i)=>`
@@ -916,35 +1027,35 @@ function openRestock(id) {
   if (!p) return;
   restockTargetId = id;
   document.getElementById('restock-modal-title').textContent = p.emoji+' '+p.name;
-  document.getElementById('restock-modal-sub').textContent = 'Stock actuel : '+p.stock+' unité(s) — Combien ajouter ?';
+  document.getElementById('restock-modal-sub').textContent   = 'Stock actuel : '+p.stock+' unité(s) — Combien ajouter ?';
   document.getElementById('restock-qty').value = '10';
   document.getElementById('restock-modal').classList.add('open');
   setTimeout(()=>document.getElementById('restock-qty').select(), 80);
 }
+window.openRestock = openRestock;
 
 function closeRestock() {
   document.getElementById('restock-modal').classList.remove('open');
   restockTargetId = null;
 }
+window.closeRestock = closeRestock;
 
-function confirmRestock() {
+async function confirmRestock() {
   if (!restockTargetId) return;
   const qty = parseInt(document.getElementById('restock-qty').value)||0;
   if (qty<=0) { showToast('⚠️ Quantité invalide'); return; }
   const p = products.find(x=>x.id===restockTargetId);
   if (!p) return;
   p.stock += qty;
-  save(); renderProducts();
+  await save();
   showToast('📦 +'+qty+' '+p.emoji+' '+p.name+' — stock : '+p.stock);
   closeRestock();
 }
+window.confirmRestock = confirmRestock;
 
-// Close on backdrop click
 document.getElementById('restock-modal').addEventListener('click', function(e) {
   if (e.target===this) closeRestock();
 });
-
-// Enter key in restock input
 document.getElementById('restock-qty').addEventListener('keydown', function(e) {
   if (e.key==='Enter') confirmRestock();
 });
@@ -963,6 +1074,7 @@ function exportCSV() {
   download(`ventes_${tag}_${today()}.csv`,csv,'text/csv');
   showToast('📥 CSV exporté !');
 }
+window.exportCSV = exportCSV;
 
 function exportTXT() {
   if (!sales.length){showToast('⚠️ Aucune vente à exporter');return;}
@@ -973,7 +1085,7 @@ function exportTXT() {
   const cash=sales.filter(s=>s.payMode!=='tpe');
   const byP={};
   sales.forEach(s=>s.items.forEach(i=>{if(!byP[i.name])byP[i.name]=0;byP[i.name]+=i.qty;}));
-  const lbl = ACCOUNTS[currentSpace].label.toUpperCase();
+  const lbl=ACCOUNTS[currentSpace].label.toUpperCase();
   let txt=`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
   txt+=`   🧁 RAPPORT DE VENTE — ${lbl}\n`;
   txt+=`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
@@ -1005,38 +1117,42 @@ function exportTXT() {
   download(`rapport_${tag}_${today()}.txt`,txt,'text/plain');
   showToast('📄 Rapport exporté !');
 }
+window.exportTXT = exportTXT;
 
-function clearHistory() {
+async function clearHistory() {
   if (!confirm("Effacer tout l'historique des ventes ?")) return;
-  sales=[]; save(); renderHistorique(); updateHeader();
+  sales=[];
+  await save();
+  renderHistorique();
   showToast('🗑 Historique effacé');
 }
+window.clearHistory = clearHistory;
 
-function download(filename,content,type) {
+function download(filename, content, type) {
   const blob=new Blob(['\uFEFF'+content],{type:type+';charset=utf-8;'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
-  a.href=url;a.download=filename;a.click();
+  a.href=url; a.download=filename; a.click();
   URL.revokeObjectURL(url);
 }
 
 /* ── THÈME ───────────────────────────────────────────── */
 const THEMES = [
-  {name:'Caramel',   bg:'#FDF6EC',accent:'#C8884A',dark:'#A06830',brown:'#3D2010',warm:'#F5E6C8',border:'#E8D5B0'},
-  {name:'Chocolat',  bg:'#F5EDE3',accent:'#7B4B2A',dark:'#5C3420',brown:'#2C1008',warm:'#EAD8C8',border:'#D8BFA8'},
-  {name:'Fraise',    bg:'#FFF0F2',accent:'#D94F6E',dark:'#B03050',brown:'#5C1020',warm:'#FFD8E0',border:'#F8BCC8'},
-  {name:'Matcha',    bg:'#F0F5EE',accent:'#5A8A4A',dark:'#3A6830',brown:'#1A3A10',warm:'#D8EACC',border:'#B8D8A8'},
-  {name:'Bleuet',    bg:'#EEF2FF',accent:'#3A6BE8',dark:'#2A4CC0',brown:'#0A1A5C',warm:'#D0DAFF',border:'#B0C4F8'},
-  {name:'Lavande',   bg:'#F5F0FF',accent:'#7A4AE8',dark:'#5A30C0',brown:'#2A0A5C',warm:'#DDD0FF',border:'#C4B0F8'},
-  {name:'Nuit',      bg:'#1A1A2E',accent:'#E8A84A',dark:'#C08030',brown:'#F5E6C8',warm:'#2A2A4E',border:'#3A3A5E'},
-  {name:'Rose',      bg:'#FFF0F8',accent:'#D84A8A',dark:'#B03070',brown:'#5C0830',warm:'#FFD0EC',border:'#F8B0D8'},
+  {name:'Caramel',  bg:'#FDF6EC',accent:'#C8884A',dark:'#A06830',brown:'#3D2010',warm:'#F5E6C8',border:'#E8D5B0'},
+  {name:'Chocolat', bg:'#F5EDE3',accent:'#7B4B2A',dark:'#5C3420',brown:'#2C1008',warm:'#EAD8C8',border:'#D8BFA8'},
+  {name:'Fraise',   bg:'#FFF0F2',accent:'#D94F6E',dark:'#B03050',brown:'#5C1020',warm:'#FFD8E0',border:'#F8BCC8'},
+  {name:'Matcha',   bg:'#F0F5EE',accent:'#5A8A4A',dark:'#3A6830',brown:'#1A3A10',warm:'#D8EACC',border:'#B8D8A8'},
+  {name:'Bleuet',   bg:'#EEF2FF',accent:'#3A6BE8',dark:'#2A4CC0',brown:'#0A1A5C',warm:'#D0DAFF',border:'#B0C4F8'},
+  {name:'Lavande',  bg:'#F5F0FF',accent:'#7A4AE8',dark:'#5A30C0',brown:'#2A0A5C',warm:'#DDD0FF',border:'#C4B0F8'},
+  {name:'Nuit',     bg:'#1A1A2E',accent:'#E8A84A',dark:'#C08030',brown:'#F5E6C8',warm:'#2A2A4E',border:'#3A3A5E'},
+  {name:'Rose',     bg:'#FFF0F8',accent:'#D84A8A',dark:'#B03070',brown:'#5C0830',warm:'#FFD0EC',border:'#F8B0D8'},
 ];
 
 function renderThemes() {
   const grid = document.getElementById('theme-grid');
   if (!grid) return;
   const saved = localStorage.getItem('caisse_premiere_theme');
-  const cur = saved ? JSON.parse(saved) : THEMES[0];
+  const cur   = saved ? JSON.parse(saved) : THEMES[0];
   grid.innerHTML = THEMES.map(t=>`
     <div class="theme-swatch ${cur.name===t.name?'active':''}"
          onclick='applyThemeObj(${JSON.stringify(t)})'>
@@ -1044,8 +1160,9 @@ function renderThemes() {
       ${t.name}
     </div>`).join('');
 }
+window.renderThemes = renderThemes;
 
-function applyThemeObj(t, save=true) {
+function applyThemeObj(t, saveTheme=true) {
   const r = document.documentElement.style;
   r.setProperty('--accent',      t.accent);
   r.setProperty('--accent-dark', t.dark);
@@ -1055,15 +1172,16 @@ function applyThemeObj(t, save=true) {
   r.setProperty('--bg-warm',     t.warm||t.accent+'22');
   r.setProperty('--border',      t.border||t.accent+'44');
   document.body.style.background = t.bg;
-  if (save && currentSpace==='premiere') {
+  if (saveTheme && currentSpace==='premiere') {
     localStorage.setItem('caisse_premiere_theme', JSON.stringify(t));
   }
   const picker = document.getElementById('custom-bg-color');
   const hexEl  = document.getElementById('custom-bg-hex');
-  if (picker) picker.value = t.bg;
+  if (picker) picker.value   = t.bg;
   if (hexEl)  hexEl.textContent = t.bg;
   renderThemes();
 }
+window.applyThemeObj = applyThemeObj;
 
 function applyCustomBg(hex) {
   document.documentElement.style.setProperty('--bg-body', hex);
@@ -1077,15 +1195,17 @@ function applyCustomBg(hex) {
     localStorage.setItem('caisse_premiere_theme', JSON.stringify(t));
   }
 }
+window.applyCustomBg = applyCustomBg;
 
 function resetTheme() {
   applyThemeObj(THEMES[0]);
   if (currentSpace==='premiere') localStorage.removeItem('caisse_premiere_theme');
   showToast('↺ Thème réinitialisé');
 }
+window.resetTheme = resetTheme;
 
 /* ── UTILS ───────────────────────────────────────────── */
-const fmt  = v => v.toFixed(2).replace('.', ',') + ' €';
+const fmt   = v => v.toFixed(2).replace('.', ',') + ' €';
 const today = () => new Date().toLocaleDateString('fr-FR').replace(/\//g, '-');
 
 function showToast(msg) {
@@ -1096,7 +1216,7 @@ function showToast(msg) {
 
 function updateHeader() {
   if (!currentSpace) return;
-  document.getElementById('hdr-ventes').textContent = sales.length;
+  document.getElementById('hdr-ventes').textContent  = sales.length;
   const ca = sales.reduce((s,v)=>s+v.total,0);
   document.getElementById('hdr-recette').textContent = fmt(ca);
   const caTpe  = sales.filter(s=>s.payMode==='tpe').reduce((s,v)=>s+v.total,0);
@@ -1110,6 +1230,18 @@ function updateClock() {
   if (el) el.textContent = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
 }
 setInterval(updateClock, 15000);
+
+/* ── DÉMARRAGE ───────────────────────────────────────── */
+// Masquer l'écran de chargement et afficher le login une fois Firebase prêt
+window.addEventListener('load', () => {
+  // Court délai pour laisser Firebase s'initialiser
+  setTimeout(() => {
+    document.getElementById('loading-screen').style.display = 'none';
+    document.getElementById('login-page').style.display = 'flex';
+    updateClock();
+  }, 800);
+});
+
 </script>
 </body>
 </html>
